@@ -1,0 +1,11 @@
+Training source: kaggle_disease_dataset
+Rows: 5200
+
+              precision    recall  f1-score   support
+
+           0      0.990     0.979     0.984      3569
+           1      0.955     0.978     0.966      1631
+
+    accuracy                          0.978      5200
+   macro avg      0.972     0.978     0.975      5200
+weighted avg      0.979     0.978     0.979      5200

@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Climate-Health Risk Dashboard</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 0; background: #eef2ff; color: #0f172a; }
+      .container { max-width: 1280px; margin: 0 auto; padding: 20px; }
+      .hero {
+        background: linear-gradient(120deg, #1d4ed8 0%, #0f172a 90%);
+        color: #ffffff;
+        padding: 18px 20px;
+        border-radius: 12px;
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.25);
+      }
+      h1 { margin: 0 0 6px 0; font-size: 30px; letter-spacing: 0.2px; }
+      .subtitle { margin: 0; color: #dbeafe; font-size: 15px; }
+      .cards { display: grid; grid-template-columns: repeat(4, minmax(180px, 1fr)); gap: 14px; margin: 20px 0; }
+      .card { background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 3px 10px rgba(15, 23, 42, 0.15); }
+      .card-title { font-size: 13px; color: #334155; font-weight: bold; text-transform: uppercase; letter-spacing: 0.7px; }
+      .card-count { font-size: 34px; font-weight: 700; margin-top: 8px; line-height: 1; }
+      .critical { border-left: 6px solid #dc2626; }
+      .high { border-left: 6px solid #ea580c; }
+      .moderate { border-left: 6px solid #d97706; }
+      .low { border-left: 6px solid #16a34a; }
+      table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12); }
+      th, td { padding: 11px 9px; border-bottom: 1px solid #e2e8f0; text-align: left; vertical-align: top; font-size: 13px; }
+      th { background: #dbeafe; color: #0f172a; font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; }
+      .actions { margin: 0; padding-left: 18px; }
+      .controls { margin: 10px 0 14px 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+      .controls select, .controls button, .controls input {
+        padding: 9px 12px;
+        border-radius: 8px;
+        border: 1px solid #93c5fd;
+        font-weight: 600;
+      }
+      .controls button { background: #1d4ed8; color: #fff; border-color: #1d4ed8; cursor: pointer; }
+      .controls a {
+        padding: 9px 12px;
+        border-radius: 8px;
+        background: #0f172a;
+        color: #fff;
+        text-decoration: none;
+        font-size: 13px;
+      }
+      .section { background:#fff; padding:16px; border-radius:12px; margin:16px 0; box-shadow: 0 3px 10px rgba(15, 23, 42, 0.15);}
+      .meta { color:#1e293b; font-size:13px; margin: 10px 0; }
+      .status-form select { padding: 6px 8px; border-radius: 6px; border: 1px solid #94a3b8; }
+      .map-wrap { display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap; }
+      .map-legend { min-width:200px; }
+      .chip { display:inline-block; padding:5px 10px; border-radius:14px; font-size:12px; margin:3px 6px 3px 0; color:#0f172a; font-weight: 700; }
+      .c-critical { background:#fecaca; }
+      .c-high { background:#fed7aa; }
+      .c-moderate { background:#fde68a; }
+      .c-low { background:#bbf7d0; }
+      .tile-label { font-size:11px; fill:#0f172a; font-weight:bold; }
+      .tile-score { font-size:10px; fill:#334155; }
+      .region-label { font-size:10px; fill:#0f172a; font-weight:bold; }
+      .country-outline { fill:#f8fafc; stroke:#334155; stroke-width:2; }
+      .region-shape { stroke:#334155; stroke-width:1.2; }
+      .risk-badge { display:inline-block; padding:4px 8px; border-radius:999px; font-size:12px; font-weight:700; color:#0f172a; }
+      .risk-critical { background:#fecaca; }
+      .risk-high { background:#fed7aa; }
+      .risk-moderate { background:#fde68a; }
+      .risk-low { background:#bbf7d0; }
+      .brand { font-size: 13px; color: #cbd5e1; margin-top: 8px; }
+      .footer-note {
+        margin-top: 18px;
+        font-size: 12px;
+        color: #475569;
+        text-align: center;
+        padding: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="hero">
+        <h1>Climate-Health Early Warning Dashboard</h1>
+        <p class="subtitle">Zimbabwe district monitoring with AI-driven outbreak probabilities and live scenario simulation.</p>
+        <p class="brand">Developed by Fidinsky Tech Solutions</p>
+      </div>
+      <p class="meta"><strong>AI/Data Science Layer:</strong> {{ ai_summary }}</p>
+
+    <form class="controls" method="get" action="/">
+      <label for="risk_level">Filter by risk level:</label>
+      <select name="risk_level" id="risk_level">
+        <option value="" {% if not selected %}selected{% endif %}>All</option>
+        <option value="critical" {% if selected == "critical" %}selected{% endif %}>Critical</option>
+        <option value="high" {% if selected == "high" %}selected{% endif %}>High</option>
+        <option value="moderate" {% if selected == "moderate" %}selected{% endif %}>Moderate</option>
+        <option value="low" {% if selected == "low" %}selected{% endif %}>Low</option>
+      </select>
+      <label for="audience">Role view:</label>
+      <select name="audience" id="audience">
+        <option value="" {% if not audience %}selected{% endif %}>All roles</option>
+        <option value="clinic" {% if audience == "clinic" %}selected{% endif %}>Clinic</option>
+        <option value="community" {% if audience == "community" %}selected{% endif %}>Community</option>
+        <option value="local_government" {% if audience == "local_government" %}selected{% endif %}>Local Government</option>
+      </select>
+      <label for="rainfall_factor">Rainfall x</label>
+      <select name="rainfall_factor" id="rainfall_factor">
+        <option value="1.0" {% if rainfall_factor == 1.0 %}selected{% endif %}>1.0</option>
+        <option value="1.2" {% if rainfall_factor == 1.2 %}selected{% endif %}>1.2</option>
+        <option value="1.5" {% if rainfall_factor == 1.5 %}selected{% endif %}>1.5</option>
+      </select>
+      <label for="temp_offset">Temp +</label>
+      <select name="temp_offset" id="temp_offset">
+        <option value="0.0" {% if temp_offset == 0.0 %}selected{% endif %}>0C</option>
+        <option value="1.0" {% if temp_offset == 1.0 %}selected{% endif %}>+1C</option>
+        <option value="2.0" {% if temp_offset == 2.0 %}selected{% endif %}>+2C</option>
+      </select>
+      <button type="submit">Apply</button>
+      <a href="/export.csv">Download CSV</a>
+      <a href="/export.pdf">Download PDF</a>
+    </form>
+    <form class="controls" method="post" action="/refresh-climate">
+      <button type="submit">Refresh Climate From Internet</button>
+    </form>
+    <form class="controls" method="post" action="/train-model">
+      <label for="start_date">Train from</label>
+      <input type="date" id="start_date" name="start_date" />
+      <label for="end_date">to</label>
+      <input type="date" id="end_date" name="end_date" />
+      <button type="submit">Train Outbreak Model</button>
+    </form>
+
+    <div class="section">
+      <h3>Zimbabwe Risk Map (Choropleth-style)</h3>
+      <div class="map-wrap">
+        <svg width="560" height="320" viewBox="0 0 560 320" role="img" aria-label="Zimbabwe risk map">
+          <path class="country-outline" d="M70,70 L130,45 L210,50 L285,35 L350,58 L430,75 L485,130 L455,180 L470,230 L430,260 L360,278 L300,270 L245,290 L180,275 L120,250 L95,205 L65,165 L75,120 Z" />
+
+          {% set harare = district_lookup.get("Harare") %}
+          {% set bulawayo = district_lookup.get("Bulawayo") %}
+          {% set mutare = district_lookup.get("Mutare") %}
+          {% set masvingo = district_lookup.get("Masvingo") %}
+          {% set gweru = district_lookup.get("Gweru") %}
+
+          {% set harare_fill = "#bbf7d0" %}
+          {% if harare and harare.risk_level == "critical" %}{% set harare_fill = "#fecaca" %}{% elif harare and harare.risk_level == "high" %}{% set harare_fill = "#fed7aa" %}{% elif harare and harare.risk_level == "moderate" %}{% set harare_fill = "#fde68a" %}{% endif %}
+          {% set bulawayo_fill = "#bbf7d0" %}
+          {% if bulawayo and bulawayo.risk_level == "critical" %}{% set bulawayo_fill = "#fecaca" %}{% elif bulawayo and bulawayo.risk_level == "high" %}{% set bulawayo_fill = "#fed7aa" %}{% elif bulawayo and bulawayo.risk_level == "moderate" %}{% set bulawayo_fill = "#fde68a" %}{% endif %}
+          {% set mutare_fill = "#bbf7d0" %}
+          {% if mutare and mutare.risk_level == "critical" %}{% set mutare_fill = "#fecaca" %}{% elif mutare and mutare.risk_level == "high" %}{% set mutare_fill = "#fed7aa" %}{% elif mutare and mutare.risk_level == "moderate" %}{% set mutare_fill = "#fde68a" %}{% endif %}
+          {% set masvingo_fill = "#bbf7d0" %}
+          {% if masvingo and masvingo.risk_level == "critical" %}{% set masvingo_fill = "#fecaca" %}{% elif masvingo and masvingo.risk_level == "high" %}{% set masvingo_fill = "#fed7aa" %}{% elif masvingo and masvingo.risk_level == "moderate" %}{% set masvingo_fill = "#fde68a" %}{% endif %}
+          {% set gweru_fill = "#bbf7d0" %}
+          {% if gweru and gweru.risk_level == "critical" %}{% set gweru_fill = "#fecaca" %}{% elif gweru and gweru.risk_level == "high" %}{% set gweru_fill = "#fed7aa" %}{% elif gweru and gweru.risk_level == "moderate" %}{% set gweru_fill = "#fde68a" %}{% endif %}
+
+          <path class="region-shape" fill="{{ bulawayo_fill }}" d="M110,145 L175,125 L215,150 L190,198 L125,205 L95,172 Z" />
+          <text class="region-label" x="120" y="168">Bulawayo</text>
+          {% if bulawayo %}<text class="tile-score" x="120" y="182">{{ bulawayo.risk_level|upper }} {{ bulawayo.risk_score }}</text>{% endif %}
+
+          <path class="region-shape" fill="{{ gweru_fill }}" d="M180,120 L260,102 L300,132 L275,182 L215,192 L190,165 Z" />
+          <text class="region-label" x="205" y="145">Gweru</text>
+          {% if gweru %}<text class="tile-score" x="205" y="159">{{ gweru.risk_level|upper }} {{ gweru.risk_score }}</text>{% endif %}
+
+          <path class="region-shape" fill="{{ harare_fill }}" d="M245,75 L305,68 L330,92 L305,118 L250,110 L230,92 Z" />
+          <text class="region-label" x="252" y="94">Harare</text>
+          {% if harare %}<text class="tile-score" x="252" y="108">{{ harare.risk_level|upper }} {{ harare.risk_score }}</text>{% endif %}
+
+          <path class="region-shape" fill="{{ mutare_fill }}" d="M330,98 L405,95 L450,132 L425,182 L358,180 L315,145 Z" />
+          <text class="region-label" x="355" y="135">Mutare</text>
+          {% if mutare %}<text class="tile-score" x="355" y="149">{{ mutare.risk_level|upper }} {{ mutare.risk_score }}</text>{% endif %}
+
+          <path class="region-shape" fill="{{ masvingo_fill }}" d="M230,186 L312,190 L358,226 L318,264 L250,255 L210,220 Z" />
+          <text class="region-label" x="250" y="220">Masvingo</text>
+          {% if masvingo %}<text class="tile-score" x="250" y="234">{{ masvingo.risk_level|upper }} {{ masvingo.risk_score }}</text>{% endif %}
+        </svg>
+
+        <div class="map-legend">
+          <div><span class="chip c-critical">Critical</span></div>
+          <div><span class="chip c-high">High</span></div>
+          <div><span class="chip c-moderate">Moderate</span></div>
+          <div><span class="chip c-low">Low</span></div>
+          <p class="meta">Color intensity reflects model risk class for each district reference tile.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Zimbabwe Location Reference (Map Data)</h3>
+      <table>
+        <thead>
+          <tr><th>Location</th><th>District</th><th>Latitude</th><th>Longitude</th></tr>
+        </thead>
+        <tbody>
+          {% for alert in alerts %}
+          <tr>
+            <td>{{ alert.location_id }}</td>
+            <td>{{ alert.district }}</td>
+            <td>{{ alert.lat }}</td>
+            <td>{{ alert.lon }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h3>Risk Trend (Last 4 Weeks)</h3>
+      <table>
+        <thead><tr><th>Location</th><th>W-3</th><th>W-2</th><th>W-1</th><th>Current</th></tr></thead>
+        <tbody>
+          {% for location_id, vals in trends.items() %}
+          <tr>
+            <td>{{ location_id }}</td>
+            <td>{{ vals[0] }}</td>
+            <td>{{ vals[1] }}</td>
+            <td>{{ vals[2] }}</td>
+            <td>{{ vals[3] }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="cards">
+      <div class="card critical"><div class="card-title">Critical Alerts</div><div class="card-count">{{ counts.critical }}</div></div>
+      <div class="card high"><div class="card-title">High Alerts</div><div class="card-count">{{ counts.high }}</div></div>
+      <div class="card moderate"><div class="card-title">Moderate Alerts</div><div class="card-count">{{ counts.moderate }}</div></div>
+      <div class="card low"><div class="card-title">Low Alerts</div><div class="card-count">{{ counts.low }}</div></div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Location</th>
+          <th>Week</th>
+          <th>Risk Score</th>
+          <th>Outbreak Prob</th>
+          <th>Risk Level</th>
+          <th>AI Insight</th>
+          <th>Anomaly</th>
+          <th>Action Tracking</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for alert in alerts %}
+        <tr>
+          <td>{{ alert.location_id }}</td>
+          <td>{{ alert.week }}</td>
+          <td>{{ alert.risk_score }}</td>
+          <td>{{ alert.outbreak_probability }}</td>
+          <td>
+            <span class="risk-badge risk-{{ alert.risk_level }}">{{ alert.risk_level|upper }}</span>
+          </td>
+          <td>{{ alert.ai_top_drivers }}</td>
+          <td>{{ "Yes" if alert.anomaly_flag else "No" }}</td>
+          <td>
+            <form class="status-form" method="post" action="/action-status">
+              <input type="hidden" name="location_id" value="{{ alert.location_id }}" />
+              <select name="status" onchange="this.form.submit()">
+                <option value="new" {% if alert.action_status == "new" %}selected{% endif %}>New</option>
+                <option value="in_progress" {% if alert.action_status == "in_progress" %}selected{% endif %}>In progress</option>
+                <option value="completed" {% if alert.action_status == "completed" %}selected{% endif %}>Completed</option>
+              </select>
+            </form>
+          </td>
+          <td>
+            <ul class="actions">
+              {% for action in alert.actions %}
+              <li><strong>{{ action.audience }}:</strong> {{ action.action }}</li>
+              {% endfor %}
+            </ul>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="footer-note">
+      Developed by Fidinsky Tech Solutions | UNICEF Climate-Health Innovation Prototype
+    </div>
+    </div>
+  </body>
+  </html>

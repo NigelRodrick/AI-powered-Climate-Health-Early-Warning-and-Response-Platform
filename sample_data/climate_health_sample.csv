@@ -1,0 +1,6 @@
+location_id,week,flood_risk_index,clinic_case_load_index,medicine_stock_gap_index,temperature_c,rainfall_mm
+ZW-Harare-001,2026-W16,0.48,0.51,0.3,17.8,1.6
+ZW-Bulawayo-002,2026-W16,0.27,0.39,0.24,15.6,0.0
+ZW-Mutare-003,2026-W16,0.83,0.72,0.58,18.2,18.9
+ZW-Masvingo-004,2026-W16,0.22,0.34,0.44,16.4,2.3
+ZW-Gweru-005,2026-W16,0.57,0.6,0.37,15.5,1.4
