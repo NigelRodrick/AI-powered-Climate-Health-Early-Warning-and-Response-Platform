@@ -6,3 +6,5 @@ venv/
 output/
 tools/
 *.mp4
+
+sample_data/live_state.json

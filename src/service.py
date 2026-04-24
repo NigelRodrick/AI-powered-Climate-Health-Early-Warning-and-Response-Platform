@@ -18,13 +18,22 @@ from risk_scoring import score_locations
 ROOT = Path(__file__).resolve().parent.parent
 ACTION_STATUS_PATH = ROOT / "sample_data" / "action_status.json"
 MODEL_PATH = ROOT / "models" / "outbreak_model.joblib"
+KAGGLE_PATH = ROOT / "sample_data" / "kaggle_disease_dataset.csv"
 
 LOCATION_COORDS = {
-    "ZW-Harare-001": {"district": "Harare", "lat": -17.8292, "lon": 31.0522},
-    "ZW-Bulawayo-002": {"district": "Bulawayo", "lat": -20.1325, "lon": 28.6265},
-    "ZW-Mutare-003": {"district": "Mutare", "lat": -18.9707, "lon": 32.6709},
-    "ZW-Masvingo-004": {"district": "Masvingo", "lat": -20.0744, "lon": 30.8327},
-    "ZW-Gweru-005": {"district": "Gweru", "lat": -19.455, "lon": 29.8167},
+    "ZW-Harare-001": {"district": "Harare", "city": "Harare", "region": "Harare Metropolitan", "lat": -17.8292, "lon": 31.0522},
+    "ZW-Bulawayo-002": {"district": "Bulawayo", "city": "Bulawayo", "region": "Bulawayo Metropolitan", "lat": -20.1325, "lon": 28.6265},
+    "ZW-Mutare-003": {"district": "Mutare", "city": "Mutare", "region": "Manicaland", "lat": -18.9707, "lon": 32.6709},
+    "ZW-Masvingo-004": {"district": "Masvingo", "city": "Masvingo", "region": "Masvingo", "lat": -20.0744, "lon": 30.8327},
+    "ZW-Gweru-005": {"district": "Gweru", "city": "Gweru", "region": "Midlands", "lat": -19.455, "lon": 29.8167},
+}
+
+DISEASE_TYPE_KEYWORDS = {
+    "Infectious": ["flu", "influenza", "cold", "malaria", "dengue", "cholera", "covid", "infection", "pneumonia"],
+    "Cardiovascular": ["heart", "hypertension", "stroke", "cardio"],
+    "Respiratory": ["asthma", "sinus", "respiratory", "bronch"],
+    "Gastrointestinal": ["diarrhea", "stomach", "abdominal", "gastro", "vomit"],
+    "Neurological": ["migraine", "headache", "neuro", "confusion"],
 }
 
 
@@ -210,3 +219,145 @@ def export_pdf(alerts: list[dict[str, Any]]) -> bytes:
         story.append(Spacer(1, 4))
     doc.build(story)
     return buffer.getvalue()
+
+
+def export_daily_brief(alerts: list[dict[str, Any]], messages: list[dict[str, str]]) -> bytes:
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4)
+    styles = getSampleStyleSheet()
+    story = [Paragraph("Daily Climate-Health Risk Brief", styles["Title"]), Spacer(1, 8)]
+
+    top_alerts = sorted(alerts, key=lambda a: float(a.get("risk_score", 0.0)), reverse=True)[:3]
+    story.append(Paragraph("Top Priority Alerts", styles["Heading2"]))
+    for a in top_alerts:
+        story.append(
+            Paragraph(
+                f"{a.get('city','N/A')} ({a.get('region','N/A')}): {a.get('risk_level','N/A').upper()} | "
+                f"score {a.get('risk_score','N/A')} | outbreak prob {a.get('outbreak_probability','N/A')}",
+                styles["BodyText"],
+            )
+        )
+        story.append(Spacer(1, 4))
+
+    story.append(Spacer(1, 8))
+    story.append(Paragraph("Suggested Communication Messages", styles["Heading2"]))
+    for msg in messages[:6]:
+        story.append(
+            Paragraph(
+                f"[{msg.get('audience','').upper()}] {msg.get('city','N/A')}: {msg.get('message','')}",
+                styles["BodyText"],
+            )
+        )
+        story.append(Spacer(1, 4))
+
+    doc.build(story)
+    return buffer.getvalue()
+
+
+def _map_disease_type(prognosis: str) -> str:
+    p = prognosis.lower()
+    for disease_type, keywords in DISEASE_TYPE_KEYWORDS.items():
+        if any(k in p for k in keywords):
+            return disease_type
+    return "Other"
+
+
+def disease_type_summary_from_weather(alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not KAGGLE_PATH.exists():
+        return []
+    df = pd.read_csv(KAGGLE_PATH)
+    if "prognosis" not in df.columns:
+        return []
+
+    disease_counts = (
+        df["prognosis"]
+        .astype(str)
+        .value_counts()
+        .rename_axis("disease")
+        .reset_index(name="count")
+    )
+    disease_counts["type"] = disease_counts["disease"].apply(_map_disease_type)
+    grouped = (
+        disease_counts.groupby("type", as_index=False)["count"]
+        .sum()
+        .sort_values("count", ascending=False)
+    )
+
+    top_per_type: dict[str, str] = {}
+    for disease_type in grouped["type"]:
+        top = disease_counts[disease_counts["type"] == disease_type].head(3)["disease"].tolist()
+        top_per_type[disease_type] = ", ".join(top)
+
+    # Weather-conditioned weighting from current internet-refreshed conditions.
+    # Uses current district risk/weather signals rather than static global totals.
+    avg_temp = 0.0
+    avg_rain = 0.0
+    avg_risk = 0.0
+    if alerts:
+        avg_temp = sum(float(a.get("temperature_c", 0.0)) for a in alerts) / len(alerts)
+        avg_rain = sum(float(a.get("rainfall_mm", 0.0)) for a in alerts) / len(alerts)
+        avg_risk = sum(float(a.get("risk_score", 0.0)) for a in alerts) / len(alerts)
+
+    weights = {
+        "Infectious": 1.0 + (0.5 if avg_rain >= 80 else 0.2) + (0.4 if avg_temp >= 28 else 0.1),
+        "Respiratory": 1.0 + (0.35 if avg_temp <= 20 else 0.1) + (0.15 if avg_rain >= 60 else 0.05),
+        "Gastrointestinal": 1.0 + (0.45 if avg_rain >= 90 else 0.2),
+        "Cardiovascular": 1.0 + (0.45 if avg_temp >= 30 else 0.15),
+        "Neurological": 1.0 + (0.2 if avg_temp >= 32 else 0.05),
+        "Other": 1.0,
+    }
+    risk_multiplier = 1.0 + max(0.0, avg_risk - 0.35)
+
+    result: list[dict[str, Any]] = []
+    for _, row in grouped.iterrows():
+        disease_type = row["type"]
+        weighted_count = int(round(row["count"] * weights.get(disease_type, 1.0) * risk_multiplier))
+        result.append(
+            {
+                "type": disease_type,
+                "count": weighted_count,
+                "top_diseases": top_per_type.get(disease_type, ""),
+            }
+        )
+    return sorted(result, key=lambda x: x["count"], reverse=True)
+
+
+def disease_type_by_area(alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Return area-level disease-type risk view using current weather/risk.
+    This is a practical prototype heuristic until district-level surveillance
+    labels are integrated.
+    """
+    if not alerts:
+        return []
+
+    results: list[dict[str, Any]] = []
+    for a in alerts:
+        temp = float(a.get("temperature_c", 0.0))
+        rain = float(a.get("rainfall_mm", 0.0))
+        risk = float(a.get("risk_score", 0.0))
+
+        scores = {
+            "Infectious": 0.45 * min(1.0, rain / 120.0) + 0.35 * min(1.0, temp / 35.0) + 0.20 * risk,
+            "Respiratory": 0.40 * max(0.0, (24.0 - temp) / 12.0) + 0.30 * min(1.0, rain / 100.0) + 0.30 * risk,
+            "Gastrointestinal": 0.55 * min(1.0, rain / 140.0) + 0.20 * min(1.0, temp / 34.0) + 0.25 * risk,
+            "Cardiovascular": 0.55 * min(1.0, temp / 36.0) + 0.15 * min(1.0, rain / 150.0) + 0.30 * risk,
+            "Neurological": 0.50 * min(1.0, temp / 37.0) + 0.20 * min(1.0, rain / 160.0) + 0.30 * risk,
+        }
+        ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        top = ranked[0]
+        second = ranked[1]
+
+        results.append(
+            {
+                "region": a.get("region", "N/A"),
+                "city": a.get("city", a.get("district", "N/A")),
+                "risk_level": a.get("risk_level", "low"),
+                "dominant_type": top[0],
+                "dominant_score": round(top[1], 3),
+                "secondary_type": second[0],
+                "secondary_score": round(second[1], 3),
+            }
+        )
+
+    return sorted(results, key=lambda x: x["dominant_score"], reverse=True)

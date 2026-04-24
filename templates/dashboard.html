@@ -4,6 +4,12 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Climate-Health Risk Dashboard</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
     <style>
       body { font-family: Arial, sans-serif; margin: 0; background: #eef2ff; color: #0f172a; }
       .container { max-width: 1280px; margin: 0 auto; padding: 20px; }
@@ -49,6 +55,7 @@
       .status-form select { padding: 6px 8px; border-radius: 6px; border: 1px solid #94a3b8; }
       .map-wrap { display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap; }
       .map-legend { min-width:200px; }
+      #zimMap { width: 760px; max-width: 100%; height: 420px; border-radius: 10px; border: 1px solid #cbd5e1; }
       .chip { display:inline-block; padding:5px 10px; border-radius:14px; font-size:12px; margin:3px 6px 3px 0; color:#0f172a; font-weight: 700; }
       .c-critical { background:#fecaca; }
       .c-high { background:#fed7aa; }
@@ -72,6 +79,22 @@
         text-align: center;
         padding: 10px;
       }
+      .live-bar {
+        margin-top: 10px;
+        background: rgba(255,255,255,0.12);
+        border: 1px solid rgba(255,255,255,0.25);
+        border-radius: 10px;
+        padding: 10px 12px;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .live-pill { background: #22c55e; color: #052e16; padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+      .live-off { background: #cbd5e1; color: #0f172a; }
+      .hero .live-btn { padding: 8px 12px; border-radius: 8px; border: 0; font-weight: 700; cursor: pointer; }
+      .hero .live-btn.start { background: #22c55e; color: #052e16; }
+      .hero .live-btn.stop { background: #f59e0b; color: #422006; }
     </style>
   </head>
   <body>
@@ -80,6 +103,18 @@
         <h1>Climate-Health Early Warning Dashboard</h1>
         <p class="subtitle">Zimbabwe district monitoring with AI-driven outbreak probabilities and live scenario simulation.</p>
         <p class="brand">Developed by Fidinsky Tech Solutions</p>
+        <div class="live-bar">
+          <span id="liveState" class="live-pill live-off">LIVE MODE OFF</span>
+          <span>Last climate refresh: <strong id="lastUpdated">{{ last_updated }}</strong></span>
+          <label for="liveInterval">Auto-refresh</label>
+          <select id="liveInterval">
+            <option value="30">30s</option>
+            <option value="60" selected>60s</option>
+            <option value="120">120s</option>
+          </select>
+          <button class="live-btn start" type="button" onclick="startLiveMode()">Start Live</button>
+          <button class="live-btn stop" type="button" onclick="stopLiveMode()">Stop</button>
+        </div>
       </div>
       <p class="meta"><strong>AI/Data Science Layer:</strong> {{ ai_summary }}</p>
 
@@ -98,6 +133,20 @@
         <option value="clinic" {% if audience == "clinic" %}selected{% endif %}>Clinic</option>
         <option value="community" {% if audience == "community" %}selected{% endif %}>Community</option>
         <option value="local_government" {% if audience == "local_government" %}selected{% endif %}>Local Government</option>
+      </select>
+      <label for="region">Region</label>
+      <select name="region" id="region" onchange="this.form.submit()">
+        <option value="" {% if not selected_region %}selected{% endif %}>All regions</option>
+        {% for region in region_options %}
+        <option value="{{ region }}" {% if selected_region == region %}selected{% endif %}>{{ region }}</option>
+        {% endfor %}
+      </select>
+      <label for="city">City</label>
+      <select name="city" id="city">
+        <option value="" {% if not selected_city %}selected{% endif %}>All cities</option>
+        {% for city in city_options %}
+        <option value="{{ city }}" {% if selected_city == city %}selected{% endif %}>{{ city }}</option>
+        {% endfor %}
       </select>
       <label for="rainfall_factor">Rainfall x</label>
       <select name="rainfall_factor" id="rainfall_factor">
@@ -118,85 +167,118 @@
     <form class="controls" method="post" action="/refresh-climate">
       <button type="submit">Refresh Climate From Internet</button>
     </form>
+    <form class="controls" method="post" action="/run-demo-cycle">
+      <button type="submit">Run Demo Cycle</button>
+      <a href="/export-daily-brief.pdf">Download Daily Risk Brief</a>
+    </form>
+    <form class="controls" method="post" action="/set-demo-mode">
+      <label for="enabled">Demo Snapshot Mode</label>
+      <select id="enabled" name="enabled">
+        <option value="0" {% if not demo_mode %}selected{% endif %}>OFF (live internet updates)</option>
+        <option value="1" {% if demo_mode %}selected{% endif %}>ON (stable demo snapshot)</option>
+      </select>
+      <button type="submit">Set Mode</button>
+    </form>
     <form class="controls" method="post" action="/train-model">
-      <label for="start_date">Train from</label>
-      <input type="date" id="start_date" name="start_date" />
-      <label for="end_date">to</label>
-      <input type="date" id="end_date" name="end_date" />
       <button type="submit">Train Outbreak Model</button>
     </form>
 
     <div class="section">
-      <h3>Zimbabwe Risk Map (Choropleth-style)</h3>
+      <h3>Top 3 Priority Alerts</h3>
+      <p class="meta">Most urgent areas to act on now.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Region</th>
+            <th>City</th>
+            <th>Risk Score</th>
+            <th>Outbreak Probability</th>
+            <th>Risk Level</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for alert in top_priority_alerts %}
+          <tr>
+            <td>{{ alert.region }}</td>
+            <td>{{ alert.city }}</td>
+            <td>{{ alert.risk_score }}</td>
+            <td>{{ alert.outbreak_probability }}</td>
+            <td><span class="risk-badge risk-{{ alert.risk_level }}">{{ alert.risk_level|upper }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h3>Risk Alerts (Identified Hotspots)</h3>
+      <p class="meta">Only locations with High/Critical risk are shown here for rapid response actions.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Region</th>
+            <th>City</th>
+            <th>Place</th>
+            <th>Risk Score</th>
+            <th>Outbreak Probability</th>
+            <th>Risk Level</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for alert in risk_alerts %}
+          <tr>
+            <td>{{ alert.region }}</td>
+            <td>{{ alert.city }}</td>
+            <td>{{ alert.city }}</td>
+            <td>{{ alert.risk_score }}</td>
+            <td>{{ alert.outbreak_probability }}</td>
+            <td><span class="risk-badge risk-{{ alert.risk_level }}">{{ alert.risk_level|upper }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h3>Communication Message Templates</h3>
+      <p class="meta">Pre-generated messages by audience and risk level for rapid outreach.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Region</th>
+            <th>City</th>
+            <th>Risk</th>
+            <th>Audience</th>
+            <th>Message</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for msg in message_templates %}
+          <tr>
+            <td>{{ msg.region }}</td>
+            <td>{{ msg.city }}</td>
+            <td>{{ msg.risk_level }}</td>
+            <td>{{ msg.audience }}</td>
+            <td>{{ msg.message }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h3>Zimbabwe Live Risk Map</h3>
       <div class="map-wrap">
-        <svg width="560" height="320" viewBox="0 0 560 320" role="img" aria-label="Zimbabwe risk map">
-          <path class="country-outline" d="M70,70 L130,45 L210,50 L285,35 L350,58 L430,75 L485,130 L455,180 L470,230 L430,260 L360,278 L300,270 L245,290 L180,275 L120,250 L95,205 L65,165 L75,120 Z" />
-
-          {% set harare = district_lookup.get("Harare") %}
-          {% set bulawayo = district_lookup.get("Bulawayo") %}
-          {% set mutare = district_lookup.get("Mutare") %}
-          {% set masvingo = district_lookup.get("Masvingo") %}
-          {% set gweru = district_lookup.get("Gweru") %}
-
-          {% set harare_fill = "#bbf7d0" %}
-          {% if harare and harare.risk_level == "critical" %}{% set harare_fill = "#fecaca" %}{% elif harare and harare.risk_level == "high" %}{% set harare_fill = "#fed7aa" %}{% elif harare and harare.risk_level == "moderate" %}{% set harare_fill = "#fde68a" %}{% endif %}
-          {% set bulawayo_fill = "#bbf7d0" %}
-          {% if bulawayo and bulawayo.risk_level == "critical" %}{% set bulawayo_fill = "#fecaca" %}{% elif bulawayo and bulawayo.risk_level == "high" %}{% set bulawayo_fill = "#fed7aa" %}{% elif bulawayo and bulawayo.risk_level == "moderate" %}{% set bulawayo_fill = "#fde68a" %}{% endif %}
-          {% set mutare_fill = "#bbf7d0" %}
-          {% if mutare and mutare.risk_level == "critical" %}{% set mutare_fill = "#fecaca" %}{% elif mutare and mutare.risk_level == "high" %}{% set mutare_fill = "#fed7aa" %}{% elif mutare and mutare.risk_level == "moderate" %}{% set mutare_fill = "#fde68a" %}{% endif %}
-          {% set masvingo_fill = "#bbf7d0" %}
-          {% if masvingo and masvingo.risk_level == "critical" %}{% set masvingo_fill = "#fecaca" %}{% elif masvingo and masvingo.risk_level == "high" %}{% set masvingo_fill = "#fed7aa" %}{% elif masvingo and masvingo.risk_level == "moderate" %}{% set masvingo_fill = "#fde68a" %}{% endif %}
-          {% set gweru_fill = "#bbf7d0" %}
-          {% if gweru and gweru.risk_level == "critical" %}{% set gweru_fill = "#fecaca" %}{% elif gweru and gweru.risk_level == "high" %}{% set gweru_fill = "#fed7aa" %}{% elif gweru and gweru.risk_level == "moderate" %}{% set gweru_fill = "#fde68a" %}{% endif %}
-
-          <path class="region-shape" fill="{{ bulawayo_fill }}" d="M110,145 L175,125 L215,150 L190,198 L125,205 L95,172 Z" />
-          <text class="region-label" x="120" y="168">Bulawayo</text>
-          {% if bulawayo %}<text class="tile-score" x="120" y="182">{{ bulawayo.risk_level|upper }} {{ bulawayo.risk_score }}</text>{% endif %}
-
-          <path class="region-shape" fill="{{ gweru_fill }}" d="M180,120 L260,102 L300,132 L275,182 L215,192 L190,165 Z" />
-          <text class="region-label" x="205" y="145">Gweru</text>
-          {% if gweru %}<text class="tile-score" x="205" y="159">{{ gweru.risk_level|upper }} {{ gweru.risk_score }}</text>{% endif %}
-
-          <path class="region-shape" fill="{{ harare_fill }}" d="M245,75 L305,68 L330,92 L305,118 L250,110 L230,92 Z" />
-          <text class="region-label" x="252" y="94">Harare</text>
-          {% if harare %}<text class="tile-score" x="252" y="108">{{ harare.risk_level|upper }} {{ harare.risk_score }}</text>{% endif %}
-
-          <path class="region-shape" fill="{{ mutare_fill }}" d="M330,98 L405,95 L450,132 L425,182 L358,180 L315,145 Z" />
-          <text class="region-label" x="355" y="135">Mutare</text>
-          {% if mutare %}<text class="tile-score" x="355" y="149">{{ mutare.risk_level|upper }} {{ mutare.risk_score }}</text>{% endif %}
-
-          <path class="region-shape" fill="{{ masvingo_fill }}" d="M230,186 L312,190 L358,226 L318,264 L250,255 L210,220 Z" />
-          <text class="region-label" x="250" y="220">Masvingo</text>
-          {% if masvingo %}<text class="tile-score" x="250" y="234">{{ masvingo.risk_level|upper }} {{ masvingo.risk_score }}</text>{% endif %}
-        </svg>
+        <div id="zimMap" aria-label="Zimbabwe map with live risk markers"></div>
 
         <div class="map-legend">
           <div><span class="chip c-critical">Critical</span></div>
           <div><span class="chip c-high">High</span></div>
           <div><span class="chip c-moderate">Moderate</span></div>
           <div><span class="chip c-low">Low</span></div>
-          <p class="meta">Color intensity reflects model risk class for each district reference tile.</p>
+          <p class="meta">Markers are placed on real city coordinates over Zimbabwe basemap.</p>
         </div>
       </div>
-    </div>
-
-    <div class="section">
-      <h3>Zimbabwe Location Reference (Map Data)</h3>
-      <table>
-        <thead>
-          <tr><th>Location</th><th>District</th><th>Latitude</th><th>Longitude</th></tr>
-        </thead>
-        <tbody>
-          {% for alert in alerts %}
-          <tr>
-            <td>{{ alert.location_id }}</td>
-            <td>{{ alert.district }}</td>
-            <td>{{ alert.lat }}</td>
-            <td>{{ alert.lon }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
     </div>
 
     <div class="section">
@@ -217,6 +299,60 @@
       </table>
     </div>
 
+    <div class="section">
+      <h3>Disease by Type (Weather-Conditioned)</h3>
+      <p class="meta">Type counts are adjusted using current internet climate inputs and district risk levels.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Disease Type</th>
+            <th>Total Records</th>
+            <th>Top Diseases</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in disease_types %}
+          <tr>
+            <td>{{ item.type }}</td>
+            <td>{{ item.count }}</td>
+            <td>{{ item.top_diseases }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h3>Disease Type Risk by Area</h3>
+      <p class="meta">Shows which region/city is currently most exposed to which disease types.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Region</th>
+            <th>City</th>
+            <th>Risk Level</th>
+            <th>Primary Disease Type</th>
+            <th>Primary Score</th>
+            <th>Secondary Disease Type</th>
+            <th>Secondary Score</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in disease_types_area %}
+          <tr>
+            <td>{{ row.region }}</td>
+            <td>{{ row.city }}</td>
+            <td><span class="risk-badge risk-{{ row.risk_level }}">{{ row.risk_level|upper }}</span></td>
+            <td>{{ row.dominant_type }}</td>
+            <td>{{ row.dominant_score }}</td>
+            <td>{{ row.secondary_type }}</td>
+            <td>{{ row.secondary_score }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
     <div class="cards">
       <div class="card critical"><div class="card-title">Critical Alerts</div><div class="card-count">{{ counts.critical }}</div></div>
       <div class="card high"><div class="card-title">High Alerts</div><div class="card-count">{{ counts.high }}</div></div>
@@ -224,10 +360,42 @@
       <div class="card low"><div class="card-title">Low Alerts</div><div class="card-count">{{ counts.low }}</div></div>
     </div>
 
+    <div class="section">
+      <h3>All Model Predictions (Unfiltered)</h3>
+      <p class="meta">This table always shows all prediction outputs from the trained model for current records.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Place</th>
+            <th>Week</th>
+            <th>Risk Score</th>
+            <th>Outbreak Prob</th>
+            <th>Risk Level</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for alert in all_alerts %}
+          <tr>
+            <td>{{ alert.city }}</td>
+            <td>{{ alert.week }}</td>
+            <td>{{ alert.risk_score }}</td>
+            <td>{{ alert.outbreak_probability }}</td>
+            <td><span class="risk-badge risk-{{ alert.risk_level }}">{{ alert.risk_level|upper }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h3>Filtered Operational View</h3>
+      <p class="meta">Use filter controls above to narrow this action-focused table.</p>
+    </div>
+
     <table>
       <thead>
         <tr>
-          <th>Location</th>
+          <th>Place</th>
           <th>Week</th>
           <th>Risk Score</th>
           <th>Outbreak Prob</th>
@@ -241,7 +409,7 @@
       <tbody>
         {% for alert in alerts %}
         <tr>
-          <td>{{ alert.location_id }}</td>
+          <td>{{ alert.city }}</td>
           <td>{{ alert.week }}</td>
           <td>{{ alert.risk_score }}</td>
           <td>{{ alert.outbreak_probability }}</td>
@@ -275,5 +443,78 @@
       Developed by Fidinsky Tech Solutions | UNICEF Climate-Health Innovation Prototype
     </div>
     </div>
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script>
+      let liveTimer = null;
+      const mapData = {{ all_alerts | tojson }};
+
+      function markerColor(level) {
+        if (level === "critical") return "#dc2626";
+        if (level === "high") return "#ea580c";
+        if (level === "moderate") return "#d97706";
+        return "#16a34a";
+      }
+
+      (function initMap() {
+        const map = L.map("zimMap").setView([-19.02, 29.15], 6);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 12,
+          attribution: "&copy; OpenStreetMap contributors",
+        }).addTo(map);
+
+        mapData.forEach((a) => {
+          if (a.lat == null || a.lon == null) return;
+          const marker = L.circleMarker([a.lat, a.lon], {
+            radius: 10,
+            color: "#0f172a",
+            weight: 1,
+            fillColor: markerColor(a.risk_level),
+            fillOpacity: 0.9,
+          }).addTo(map);
+          marker.bindPopup(
+            `<strong>${a.city}</strong><br/>Risk: ${a.risk_level.toUpperCase()}<br/>Score: ${a.risk_score}<br/>Outbreak Prob: ${a.outbreak_probability}`
+          );
+        });
+      })();
+
+      async function doLiveRefresh() {
+        try {
+          const res = await fetch("/refresh-climate-json", { method: "POST" });
+          const data = await res.json();
+          if (data.last_updated_utc) {
+            document.getElementById("lastUpdated").textContent = data.last_updated_utc;
+          }
+          window.location.reload();
+        } catch (err) {
+          console.error("Live refresh failed", err);
+        }
+      }
+
+      function startLiveMode() {
+        const state = document.getElementById("liveState");
+        state.textContent = "LIVE MODE ON";
+        state.classList.remove("live-off");
+
+        const intervalSec = Number(document.getElementById("liveInterval").value || "60");
+        if (liveTimer) {
+          clearInterval(liveTimer);
+        }
+        liveTimer = setInterval(doLiveRefresh, intervalSec * 1000);
+      }
+
+      function stopLiveMode() {
+        const state = document.getElementById("liveState");
+        state.textContent = "LIVE MODE OFF";
+        state.classList.add("live-off");
+        if (liveTimer) {
+          clearInterval(liveTimer);
+          liveTimer = null;
+        }
+      }
+    </script>
   </body>
   </html>
